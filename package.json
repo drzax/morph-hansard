@@ -1,0 +1,23 @@
+{
+  "name": "hansard2corpus",
+  "version": "1.0.0",
+  "description": "Takes Hansard XML and turns it into a corpus of speech suitable for training a neural network.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "scraper",
+    "hansard",
+    "australia"
+  ],
+  "author": "Simon Elvery",
+  "license": "ISC",
+  "dependencies": {
+    "cheerio": "^0.20.0",
+    "d3-queue": "^2.0.3",
+    "request": "^2.69.0",
+    "slug": "^0.9.1",
+    "sqlite3": "^3.1.1"
+  }
+}
