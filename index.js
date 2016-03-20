@@ -2,90 +2,123 @@ var cheerio = require('cheerio');
 var request = require('request');
 var fs = require('fs');
 var queue = require('d3-queue').queue(10);
-var slug = require('slug');
+var sqlite = require('sqlite3');
+var tomd = require('to-markdown');
 
 var outStreams = {
-	parl: fs.createWriteStream('./data/parliament.md'),
-	reps: fs.createWriteStream('./data/reps.md'),
-	senate: fs.createWriteStream('./data/senate.md')
+  parl: fs.createWriteStream('./data/parliament.md'),
+  reps: fs.createWriteStream('./data/reps.md'),
+  senate: fs.createWriteStream('./data/senate.md')
 };
 
 const chambers = [{
-        name: 'reps',
-	path: 'http://data.openaustralia.org/scrapedxml/representatives_debates/'
+  name: 'House',
+  path: 'http://data.openaustralia.org/scrapedxml/representatives_debates/'
 },{
-        name: 'senate',
-	path: 'http://data.openaustralia.org/scrapedxml/senate_debates/'
+  name: 'Senate',
+  path: 'http://data.openaustralia.org/scrapedxml/senate_debates/'
 }];
 
-chambers.forEach(function(chamber){
-        console.log('Request: '+chamber.path);
-        request(chamber.path, function(error,response,body){
-                var $ = cheerio.load(body);
-
-                $('a').filter(function(){
-                        return $(this).attr('href').match('[0-9]{4}-[0-9]{2}-[0-9]{2}');
-                }).each(function(){
-                        var xmlPath = chamber.path + $(this).attr('href');
-                        queue.defer(requestXml({chamber:chamber,xmlPath:xmlPath}));
-		});
-	});
+// Set up sqlite database.
+var db = new sqlite.Database("data.sqlite");
+db.serialize(function() {
+  db.run("CREATE TABLE IF NOT EXISTS data (speech_id TEXT PRIMARY KEY, chamber TEXT, debate_type TEXT, debate_subject TEXT, speaker_id TEXT, speaker_name TEXT, speech TEXT)");
+  start(db);
 });
 
+function start(db) {
+  chambers.forEach(function(chamber){
+    console.log('Request: '+chamber.path);
+    request(chamber.path, function(error,response,body){
+      var $ = cheerio.load(body);
+
+      $('a').filter(function(){
+        return $(this).attr('href').match('[0-9]{4}-[0-9]{2}-[0-9]{2}');
+      }).each(function(){
+        var xmlPath = chamber.path + $(this).attr('href');
+        queue.defer(requestXml({db:db,chamber:chamber,xmlPath:xmlPath}));
+      });
+    });
+  });
+}
+
 function requestXml(opts) {
-	return function(cb){
-		console.log('Request: '+opts.xmlPath);
-		opts.cb = cb;
-		request(opts.xmlPath, handleXml.bind(opts));
-	};
+  return function(cb){
+    console.log('Request: '+opts.xmlPath);
+    opts.cb = cb;
+    request(opts.xmlPath, handleXml.bind(opts));
+  };
 }
 
 function handleXml(err, res, body) {
 
-        var opts = this;
+  var major, minor, opts = this;
 
-	if (err) {
-		return console.error(err);
-	}
+  if (err) {
+    return console.error(err);
+  }
 
-	var $ = cheerio.load(body);
+  var $ = cheerio.load(body);
 
-        $('speech').each(function(){
-                var content = '';
-                var $speech = $(this);
-                var speaker = $speech.attr('speakername');
-		if (speaker) {
-                        var speakerId = $speech.attr('speakerid');
-                        speakerId = speakerId.slice(speakerId.lastIndexOf('/')+1);
+  $('debates').children('speech,major-heading,minor-heading').each(function(){
 
-                        var speakerSlug = slug(speakerId + ' ' + speaker, {lower: true});
+    var data = {}, node = this, $node = $(this);
 
-			// Does this speaker need a stream?
-			if (!outStreams[speakerSlug]) {
-				outStreams[speakerSlug] = fs.createWriteStream('./data/'+speakerSlug+'.md');
-			}
+    // Just note for late if it's a heading
+    if (node.name === 'major-heading') {
+      major = $(node).text().trim() || null;
+      return;
+    }
 
-			// Output to all the places
-			content += '# ' + speaker + '\n';
+    if (node.name === 'minor-heading') {
+      minor = $(node).text().trim() || null;
+      return;
+    }
 
-			$speech.find('p').each(function(){
-				var $par = $(this);
-				var italic = $par.hasClass('italic');
-				var text = $par.text().trim();
+    // Okay, we have speech lets parse it
+    data.$speech_id = $node.attr('id');
+    data.$chamber = opts.chamber.name;
+    data.$debate_type = major;
+    data.$debate_subject = minor;
+    data.$speaker_id = $node.attr('speakerid');
+    data.$speaker_name = $node.attr('speakername');
+    data.$speech = tomd($node.html(),{
+      gfm: true,
+      converters: [{
+        filter: 'dd',
+        replacement: function(content) {
+          content = content.replace(/^\s+/, '').replace(/\n/gm, '\n    ');
+          return ': ' + content;
+        }
+      },{
+        filter: 'dt',
+        replacement: function(content) {
+          content = content.replace(/^\s+/, '').replace(/\n/gm, '\n    ');
+          return content;
+        }
+      },{
+        filter: 'dl',
+        replacement: function (content, node) {
+          var strings = [];
+          for (var i = 0; i < node.childNodes.length; i++) {
+            strings.push(node.childNodes[i]._replacement);
+          }
+          return '\n\n' + strings.join('\n') + '\n\n';
+        }
+      }]
+    });
 
-				if (italic) {
-					content += '*'+text+'*\n';
-				} else {
-					content += text+'\n';
-				}
-			});
+    // Save to DB
+    updateRow(opts.db, data);
 
-			outStreams.parl.write(content);
-			outStreams[opts.chamber.name].write(content);
-			outStreams[speakerSlug].write(content);
+  });
 
-		}
-	});
+  opts.cb();
+}
 
-	opts.cb();
+function updateRow(db, values) {
+	// Insert some data.
+	var statement = db.prepare("INSERT OR REPLACE INTO data VALUES ($speech_id, $chamber, $debate_type, $debate_subject, $speaker_id, $speaker_name, $speech)");
+	statement.run(values);
+	statement.finalize();
 }
