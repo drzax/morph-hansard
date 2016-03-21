@@ -1,3 +1,11 @@
 # A scraper
 
-This thing scrapes the OpenAustralia Hansard XML to create a speech corpus suitable for training an RNN to speak like a politician.
+`./index.js`
+
+This will scrape the OpenAustralia Hansard XML to create an sqlite database of speech.
+
+# A corpus generator
+
+`./output.js`
+
+This will query the afore mentioned sqlite database and output a speech corpus suitable for training an RNN.
