@@ -108,6 +108,11 @@ function handleXml(err, res, body) {
 
   });
 
+  // Collect garbabge (this is for morph.io)
+  global.gc();
+  console.log('Manual garbabge collection: ', process.memoryUsage());
+
+  // Callback
   opts.cb();
 }
 
