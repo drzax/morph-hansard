@@ -1,15 +1,10 @@
+#! /usr/bin/env node
+
 var cheerio = require('cheerio');
 var request = require('request');
-var fs = require('fs');
 var queue = require('d3-queue').queue(10);
 var sqlite = require('sqlite3');
 var tomd = require('to-markdown');
-
-var outStreams = {
-  parl: fs.createWriteStream('./data/parliament.md'),
-  reps: fs.createWriteStream('./data/reps.md'),
-  senate: fs.createWriteStream('./data/senate.md')
-};
 
 const chambers = [{
   name: 'House',
